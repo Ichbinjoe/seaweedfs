@@ -8,6 +8,7 @@ import (
 
 	"github.com/chrislusf/seaweedfs/go/glog"
 	"github.com/chrislusf/seaweedfs/go/storage"
+	"golang.org/x/net/html/atom"
 )
 
 // mapping from volume to its locations, inverted from server to volume
@@ -104,8 +105,11 @@ func (vl *VolumeLayout) PickForWrite(count uint64, option *VolumeGrowOption) (*s
 	var vid storage.VolumeId
 	var locationList *VolumeLocationList
 	counter := 0
+	var minSpace uint = 0
 	for _, v := range vl.writables {
 		volumeLocationList := vl.vid2location[v]
+		var roundMinSpace uint = ^uint(0)
+		good := false
 		for _, dn := range volumeLocationList.list {
 			if dn.GetDataCenter().Id() == NodeId(option.DataCenter) {
 				if option.Rack != "" && dn.GetRack().Id() != NodeId(option.Rack) {
@@ -114,10 +118,28 @@ func (vl *VolumeLayout) PickForWrite(count uint64, option *VolumeGrowOption) (*s
 				if option.DataNode != "" && dn.Id() != NodeId(option.DataNode) {
 					continue
 				}
+				// IBJ.IO - Prefer nodes with the highest min space available
+				if dn.FreeSpace() < roundMinSpace {
+					roundMinSpace = dn.FreeSpace()
+				}
+				counter++
+				good = true
+				// Lets instead use the node which has the lowest size.
+				/*if rand.Intn(counter) < 1 {
+					vid, locationList = v, volumeLocationList
+				}*/
+			}
+		}
+		if good && roundMinSpace >= minSpace {
+			if roundMinSpace == minSpace {
 				counter++
 				if rand.Intn(counter) < 1 {
 					vid, locationList = v, volumeLocationList
 				}
+			} else {
+				counter = 0
+				vid, locationList = v, volumeLocationList
+				minSpace = roundMinSpace
 			}
 		}
 	}
